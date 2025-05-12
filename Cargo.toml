@@ -37,6 +37,7 @@ esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-
 esp32-nimble = "0.11.1"
 esp-idf-sys = { version = "0.36.1", default-features = false }
 esp-idf-hal = { version = "0.45.2", default-features = false }
+crc32-v2 = "0.0.5"
 
 [build-dependencies]
 embuild = "0.33"
