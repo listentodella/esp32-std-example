@@ -1,3 +1,5 @@
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 use crc32_v2::crc32;
 use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties, NimbleSub};
 use esp_idf_hal::delay::FreeRtos;
@@ -76,53 +78,76 @@ fn main() {
     header.extend_from_slice(&checksum_array);
     let header = header.as_slice();
 
-    // Modify characteristic value
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let pair2 = Arc::clone(&pair);
+
+    exp_svc_characteristic.lock().on_subscribe(
+        move |this, _conn_desc, nimble_sub: esp32_nimble::NimbleSub| {
+            println!("get nimble sub = {:?}", nimble_sub);
+            println!("instance = {:?}", this);
+            if nimble_sub.contains(NimbleSub::NOTIFY) {
+                let (lock, cvar) = &*pair2;
+                let mut started = lock.lock().unwrap();
+                *started = true;
+                cvar.notify_one();
+            }
+        },
+    );
+
+    thread::spawn(move || loop {
+        println!("waiting for new subscribe...");
+        let (lock, cvar) = &*pair;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+        *started = false;
+        println!("transfer header...");
+        exp_svc_characteristic.lock().set_value(&header).notify();
+        // this.notify_with(&header, conn_desc.conn_handle()).unwrap();
+        FreeRtos::delay_ms(10);
+        println!("transfer xml: len = {}...", experiment.len());
+
+        let chunks = experiment.chunks_exact(20);
+        let remainer = chunks.remainder();
+        for chunk in chunks {
+            exp_svc_characteristic.lock().set_value(chunk).notify();
+            // println!("chunk len = {}", chunk.len());
+            FreeRtos::delay_ms(1);
+        }
+        if !remainer.is_empty() {
+            exp_svc_characteristic.lock().set_value(remainer).notify();
+            // println!("chunk len = {}", remainer.len());
+        }
+        println!("transfer xml done");
+    });
+
+/*  // 直接在on_subscribe里传输小段数据是可行的，但是一旦多了，就会crash，不如上面的多线程版本
     exp_svc_characteristic
         .lock()
-        .on_subscribe(|_self, _, nimble_sub| {
+        .on_subscribe(|this, conn_desc, nimble_sub| {
             println!("exp svc subscribed: {:?}", nimble_sub);
             if nimble_sub.contains(NimbleSub::NOTIFY) {
                 println!("exp:transfer header...");
-                exp_svc_characteristic.lock().set_value(&header).notify();
-                FreeRtos::delay_ms(500);
+                //this.set_value(&header).notify(); // 入参只接受&Self, 而set_value等需要&mut self
+                this.notify_with(remainer, conn_desc.conn_handle()).unwrap();
                 println!("exp:transfer xml...");
 
                 let chunks = experiment.chunks_exact(20);
                 let remainer = chunks.remainder();
                 for chunk in chunks {
-                    exp_svc_characteristic.lock().set_value(chunk).notify();
+                    this.notify_with(chunk, conn_desc.conn_handle()).unwrap();
                     // println!("chunk len = {}", chunk.len());
                     FreeRtos::delay_ms(1);
                 }
                 if !remainer.is_empty() {
-                    exp_svc_characteristic.lock().set_value(remainer).notify();
+                    this.notify_with(remainer, conn_desc.conn_handle()).unwrap();
                     // println!("chunk len = {}", remainer.len());
                 }
             }
         });
-
+*/
     loop {
         FreeRtos::delay_ms(10000);
-        // println!("transfer header...");
-        // exp_svc_characteristic.lock().set_value(&header).notify();
-        // FreeRtos::delay_ms(500);
-        // println!("transfer xml...");
-
-        // let chunks = experiment.chunks_exact(20);
-        // let remainer = chunks.remainder();
-        // for chunk in chunks {
-        //     exp_svc_characteristic.lock().set_value(chunk).notify();
-        //     // println!("chunk len = {}", chunk.len());
-        //     FreeRtos::delay_ms(1);
-        // }
-        // if !remainer.is_empty() {
-        //     exp_svc_characteristic.lock().set_value(remainer).notify();
-        //     // println!("chunk len = {}", remainer.len());
-        // }
-
-        // loop {
-        println!("xfer data...");
-        //     FreeRtos::delay_ms(1000);
-        // }
     }
 }
