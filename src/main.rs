@@ -1,9 +1,9 @@
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 use crc32_v2::crc32;
 use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties, NimbleSub};
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_sys as _;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 
 fn main() {
     esp_idf_sys::link_patches();
@@ -81,7 +81,7 @@ fn main() {
     header.extend_from_slice(&name);
     header.extend_from_slice(&exp_len);
     header.extend_from_slice(&checksum_array);
-    let header = header.as_slice();
+    let header = header.as_slice().to_owned();
 
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
     let pair2 = Arc::clone(&pair);
@@ -100,7 +100,7 @@ fn main() {
     );
 
     thread::spawn(move || loop {
-        println!("waiting for new subscribe...");
+        println!("waiting for experiment subscribe...");
         let (lock, cvar) = &*pair;
         let mut started = lock.lock().unwrap();
         while !*started {
@@ -127,8 +127,7 @@ fn main() {
         println!("transfer xml done");
     });
 
-
-        let data_pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let data_pair = Arc::new((Mutex::new(false), Condvar::new()));
     let data_pair2 = Arc::clone(&data_pair);
     data_characteristic.lock().on_subscribe(
         move |this, _conn_desc, nimble_sub: esp32_nimble::NimbleSub| {
@@ -148,21 +147,37 @@ fn main() {
         },
     );
 
-    thread::spawn(move || loop {
-        // println!("waiting for new subscribe...");
-        let (lock, cvar) = &*data_pair;
-        let mut started = lock.lock().unwrap();
-        while !*started {
-            started = cvar.wait(started).unwrap();
+    thread::spawn(move || 'restart: loop {
+        println!("waiting for data subscribe...");
+         
+            let (lock, cvar) = &*data_pair;
+            let mut started = lock.lock().unwrap();
+            while !*started {
+                started = cvar.wait(started).unwrap();
+            }
         }
-        *started = false;
-
+        let mut count = 0i16;
+        let mut data = [0i16; 6];
         loop {
             // println!("upload fake data");
-            // let data = [0xffu8; 6];
-            let data = [0x10u8, 0x00, 0x00, 0x10, 0x20, 0x20];
-            data_characteristic.lock().set_value(&data).notify();
+            data[0] = count.wrapping_mul(1).wrapping_rem(0x1000);
+            data[1] = count.wrapping_mul(3).wrapping_rem(0x1000);
+            data[2] = count.wrapping_mul(5).wrapping_rem(0x1000);
+            data[3] = count.wrapping_mul(2).wrapping_rem(0x1000);
+            data[4] = count.wrapping_mul(4).wrapping_rem(0x1000);
+            data[5] = count.wrapping_mul(6).wrapping_rem(0x1000);
+            count += 1;
+            // let bytes = unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2) };
+            let bytes = unsafe { core::mem::transmute::<[i16; 6], [u8; 12]>(data) };
+            data_characteristic.lock().set_value(&bytes).notify();
             FreeRtos::delay_ms(10);
+            {
+                let (lock, cvar) = &*data_pair;
+                let started = lock.lock().unwrap();
+                if *started == false {
+                    break 'restart;
+                }
+            }
         }
 
         // reserve
@@ -172,31 +187,31 @@ fn main() {
         // *started = true;
     });
 
-/*  // 直接在on_subscribe里传输小段数据是可行的，但是一旦多了，就会crash，不如上面的多线程版本
-    exp_svc_characteristic
-        .lock()
-        .on_subscribe(|this, conn_desc, nimble_sub| {
-            println!("exp svc subscribed: {:?}", nimble_sub);
-            if nimble_sub.contains(NimbleSub::NOTIFY) {
-                println!("exp:transfer header...");
-                //this.set_value(&header).notify(); // 入参只接受&Self, 而set_value等需要&mut self
-                this.notify_with(remainer, conn_desc.conn_handle()).unwrap();
-                println!("exp:transfer xml...");
-
-                let chunks = experiment.chunks_exact(20);
-                let remainer = chunks.remainder();
-                for chunk in chunks {
-                    this.notify_with(chunk, conn_desc.conn_handle()).unwrap();
-                    // println!("chunk len = {}", chunk.len());
-                    FreeRtos::delay_ms(1);
-                }
-                if !remainer.is_empty() {
+    /*  // 直接在on_subscribe里传输小段数据是可行的，但是一旦多了，就会crash，不如上面的多线程版本
+        exp_svc_characteristic
+            .lock()
+            .on_subscribe(|this, conn_desc, nimble_sub| {
+                println!("exp svc subscribed: {:?}", nimble_sub);
+                if nimble_sub.contains(NimbleSub::NOTIFY) {
+                    println!("exp:transfer header...");
+                    //this.set_value(&header).notify(); // 入参只接受&Self, 而set_value等需要&mut self
                     this.notify_with(remainer, conn_desc.conn_handle()).unwrap();
-                    // println!("chunk len = {}", remainer.len());
+                    println!("exp:transfer xml...");
+
+                    let chunks = experiment.chunks_exact(20);
+                    let remainer = chunks.remainder();
+                    for chunk in chunks {
+                        this.notify_with(chunk, conn_desc.conn_handle()).unwrap();
+                        // println!("chunk len = {}", chunk.len());
+                        FreeRtos::delay_ms(1);
+                    }
+                    if !remainer.is_empty() {
+                        this.notify_with(remainer, conn_desc.conn_handle()).unwrap();
+                        // println!("chunk len = {}", remainer.len());
+                    }
                 }
-            }
-        });
-*/
+            });
+    */
     loop {
         FreeRtos::delay_ms(10000);
     }

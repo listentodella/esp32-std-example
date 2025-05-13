@@ -21,13 +21,13 @@
     </data-containers>
     <input>
         <bluetooth name="PL Voyager" mode="notification">
-            <config char="F000AA14-0452-4000-B000-000000000000" conversion="hexadecimal">0132</config>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="0">accYRaw</output>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="2">accXRaw</output>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="4">accZRaw</output>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="6">gyrYRaw</output>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="8">gyrXRaw</output>
-            <output char="F000AA15-0452-4000-B000-000000000000" conversion="int16BigEndian" offset="10">gyrZRaw</output>
+            <!-- <config char="F000AA14-0452-4000-B000-000000000000" conversion="hexadecimal">0132</config> -->
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="0">accYRaw</output>
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="2">accXRaw</output>
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="4">accZRaw</output>
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="6">gyrYRaw</output>
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="8">gyrXRaw</output>
+            <output char="cddf0005-30f7-4671-8b43-5e40ba53514a" conversion="int16BigEndian" offset="10">gyrZRaw</output>
         </bluetooth>
     </input>
     <views>
