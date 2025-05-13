@@ -43,6 +43,11 @@ fn main() {
         uuid128!("cddf0002-30f7-4671-8b43-5e40ba53514a"),
         NimbleProperties::READ | NimbleProperties::WRITE | NimbleProperties::NOTIFY,
     );
+    // 0005(just same as ble block in xmls) characteristic to upload sensor data
+    let data_characteristic = my_service.lock().create_characteristic(
+        uuid128!("cddf0005-30f7-4671-8b43-5e40ba53514a"),
+        NimbleProperties::READ | NimbleProperties::WRITE | NimbleProperties::NOTIFY,
+    );
 
     // Configure Advertiser Data
     ble_advertiser
@@ -120,6 +125,51 @@ fn main() {
             // println!("chunk len = {}", remainer.len());
         }
         println!("transfer xml done");
+    });
+
+
+        let data_pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let data_pair2 = Arc::clone(&data_pair);
+    data_characteristic.lock().on_subscribe(
+        move |this, _conn_desc, nimble_sub: esp32_nimble::NimbleSub| {
+            println!("get nimble sub = {:?}", nimble_sub);
+            println!("instance = {:?}", this);
+            if nimble_sub.contains(NimbleSub::NOTIFY) {
+                let (lock, cvar) = &*data_pair2;
+                let mut started = lock.lock().unwrap();
+                *started = true;
+                cvar.notify_one();
+            } else {
+                let (lock, cvar) = &*data_pair2;
+                let mut started = lock.lock().unwrap();
+                *started = false;
+                cvar.notify_one();
+            }
+        },
+    );
+
+    thread::spawn(move || loop {
+        // println!("waiting for new subscribe...");
+        let (lock, cvar) = &*data_pair;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+        *started = false;
+
+        loop {
+            // println!("upload fake data");
+            // let data = [0xffu8; 6];
+            let data = [0x10u8, 0x00, 0x00, 0x10, 0x20, 0x20];
+            data_characteristic.lock().set_value(&data).notify();
+            FreeRtos::delay_ms(10);
+        }
+
+        // reserve
+        // while *started {
+        //     started = cvar.wait(started).unwrap();
+        // }
+        // *started = true;
     });
 
 /*  // 直接在on_subscribe里传输小段数据是可行的，但是一旦多了，就会crash，不如上面的多线程版本
