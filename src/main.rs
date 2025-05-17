@@ -134,11 +134,13 @@ fn main() {
             println!("get nimble sub = {:?}", nimble_sub);
             println!("instance = {:?}", this);
             if nimble_sub.contains(NimbleSub::NOTIFY) {
+                println!("notify the client to recv experiment");
                 let (lock, cvar) = &*data_pair2;
                 let mut started = lock.lock().unwrap();
                 *started = true;
                 cvar.notify_one();
             } else {
+                println!("client Disconnected");
                 let (lock, cvar) = &*data_pair2;
                 let mut started = lock.lock().unwrap();
                 *started = false;
@@ -147,14 +149,13 @@ fn main() {
         },
     );
 
-    thread::spawn(move || 'restart: loop {
+    thread::spawn(move || {
         println!("waiting for data subscribe...");
-         
-            let (lock, cvar) = &*data_pair;
-            let mut started = lock.lock().unwrap();
-            while !*started {
-                started = cvar.wait(started).unwrap();
-            }
+
+        let (lock, cvar) = &*data_pair;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
         }
         let mut count = 0i16;
         let mut data = [0i16; 6];
@@ -171,20 +172,13 @@ fn main() {
             let bytes = unsafe { core::mem::transmute::<[i16; 6], [u8; 12]>(data) };
             data_characteristic.lock().set_value(&bytes).notify();
             FreeRtos::delay_ms(10);
-            {
-                let (lock, cvar) = &*data_pair;
-                let started = lock.lock().unwrap();
-                if *started == false {
-                    break 'restart;
-                }
-            }
-        }
 
-        // reserve
-        // while *started {
-        //     started = cvar.wait(started).unwrap();
-        // }
-        // *started = true;
+            // reserve
+            // while *started {
+            //     started = cvar.wait(started).unwrap();
+            // }
+            // *started = true;
+        }
     });
 
     /*  // 直接在on_subscribe里传输小段数据是可行的，但是一旦多了，就会crash，不如上面的多线程版本
