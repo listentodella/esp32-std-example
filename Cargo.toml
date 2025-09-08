@@ -38,6 +38,10 @@ esp32-nimble = "0.11.1"
 esp-idf-sys = { version = "0.36.1", default-features = false }
 esp-idf-hal = { version = "0.45.2", default-features = false }
 crc32-v2 = "0.0.5"
+anyhow = "1.0.99"
+tokio = { version = "1.47.1", features = ["net", "rt", "time", "io-std", "io-util", "macros"] }
+tokio-websockets = { version = "0.8.3", features = ["client", "fastrand", "sha1_smol"] }
+futures-util = { version = "0.3.31", features = ["sink"] }
 
 [build-dependencies]
 embuild = "0.33"
