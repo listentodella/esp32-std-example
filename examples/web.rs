@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::peripheral,
@@ -67,6 +68,22 @@ fn main() -> anyhow::Result<()> {
     let passwd: Option<&str> = option_env!("PASSWD");
     const SERVER_URL: Option<&str> = option_env!("SERVER_URL");
 
+    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    // Configures the button
+    let mut button = esp_idf_svc::hal::gpio::PinDriver::input(peripherals.pins.gpio9)?;
+    button.set_pull(esp_idf_svc::hal::gpio::Pull::Up)?;
+    button.set_interrupt_type(esp_idf_svc::hal::gpio::InterruptType::PosEdge)?;
+    tokio_runtime.spawn(async move {
+        loop {
+            let _ = button.wait_for_falling_edge().await;
+            log::info!("Button  pressed {:?}", button.get_level());
+            unsafe { esp_idf_svc::sys::esp_restart() }
+        }
+    });
+
     let _wifi = wifi(
         ssid.unwrap(),
         passwd.unwrap_or_default(),
@@ -75,15 +92,11 @@ fn main() -> anyhow::Result<()> {
     )
     .unwrap();
 
-    let tokio_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
     tokio_runtime.block_on(async {
         log::info!("start HTTP GET request");
         match http_get("http://httpbin.org/get").await {
-            Ok(_) => log::info!("=========================SUCCESS"),
-            Err(_) => log::error!("FAILURE============================"),
+            Ok(_) => log::info!("HTTP GET request SUCCESS"),
+            Err(_) => log::error!("HTTP GET request FAILURE"),
         }
     });
 
@@ -93,6 +106,13 @@ fn main() -> anyhow::Result<()> {
     } else {
         log::warn!("No SERVER_URL provided, skipping WebSocket task");
     }
+
+    tokio_runtime.block_on(async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            log::info!("tick");
+        }
+    });
 
     Ok(())
 }
@@ -115,7 +135,7 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     ws_stream
                         .send(tokio_websockets::Message::text(format!(
-                            "hello websocket Server {i}"
+                            "hello websocket from ESP32 to Server: {i}"
                         )))
                         .await?;
                     i += 1;
@@ -123,13 +143,32 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
                         log::info!("Done, closing WebSocket connection");
                         break;
                     }
-                } else {
-                    log::warn!("Received non-text mesg: {:?}", msg);
                 }
             }
             Err(e) => {
                 log::error!("WebSocket error: {}", e);
                 break;
+            }
+        }
+    }
+    for i in 0..10u8 {
+        let data = vec![i * 2, i * 3, i * 4];
+        let data = Bytes::from(data);
+        let payload = tokio_websockets::Payload::from(data);
+        let msg = tokio_websockets::Message::binary(payload);
+        ws_stream.send(msg).await?;
+        if let Some(msg) = ws_stream.next().await {
+            match msg {
+                Ok(msg) => {
+                    // if msg.is_binary() {
+                    let payload = msg.into_payload();
+                    log::info!("Binary message: {:x?}", payload);
+                    // }
+                }
+                Err(e) => {
+                    log::error!("WebSocket error: {}", e);
+                    break;
+                }
             }
         }
     }
