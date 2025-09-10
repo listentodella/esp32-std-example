@@ -132,7 +132,7 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
             Ok(msg) => {
                 if let Some(text) = msg.as_text() {
                     log::info!("Received message: {}", text);
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    // tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     ws_stream
                         .send(tokio_websockets::Message::text(format!(
                             "hello websocket from ESP32 to Server: {i}"
@@ -151,9 +151,11 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
             }
         }
     }
-    for i in 0..10u8 {
-        let data = vec![i * 2, i * 3, i * 4];
-        let data = Bytes::from(data);
+    for i in 0..100u8 {
+        // 直接用vec也可以
+        // let data = vec![i];
+        let data = [i];
+        let data = Bytes::copy_from_slice(data.as_ref());
         let payload = tokio_websockets::Payload::from(data);
         let msg = tokio_websockets::Message::binary(payload);
         ws_stream.send(msg).await?;
@@ -163,6 +165,8 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
                     // if msg.is_binary() {
                     let payload = msg.into_payload();
                     log::info!("Binary message: {:x?}", payload);
+                    let bytes = payload.to_vec();
+                    log::info!("bytes len = {}, data = {:x?}", bytes.len(), bytes);
                     // }
                 }
                 Err(e) => {

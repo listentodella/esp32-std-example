@@ -7,13 +7,15 @@ async def handle_client(websocket):
     print(f"New client connected from {websocket.remote_address}")
 
     # Send hello message when client connects
-    await websocket.send("hello")
+    await websocket.send("hello world")
 
     try:
         async for message in websocket:
             print(f"Received: {message}")
             # Echo back with prefix
             response = f"echo:{message}"
+            #直接发送原始数据,而上面的方式相当于发送字符串
+            #response = message
             await websocket.send(response)
             print(f"Sent: {response}")
     except websockets.exceptions.ConnectionClosed:
