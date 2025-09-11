@@ -19,6 +19,9 @@ opt-level = "z"
 
 [features]
 default = []
+#default = ["esp32c3"]
+#esp32c3 = []
+#esp32s3 = []
 
 #default = ["std", "embassy", "esp-idf-svc/native"]
 
@@ -58,5 +61,8 @@ tokio = { version = "1.47.1", features = ["net", "rt", "time", "io-std", "io-uti
 tokio-websockets = { version = "0.8.3", features = ["client", "fastrand", "sha1_smol"] }
 futures-util = { version = "0.3.31", features = ["sink"] }
 bytes = "1.10.1"
+smart-leds = "0.4.0"
+ws2812-esp32-rmt-driver = { version = "0.12.0", features = ["smart-leds-trait"] }
 [build-dependencies]
 embuild = "0.33"
+
