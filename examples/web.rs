@@ -143,6 +143,17 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
                         log::info!("Done, closing WebSocket connection");
                         break;
                     }
+                } else {
+                    let ws_msg = msg.clone();
+                    //log::info!("Received message: {:?}", ws_msg);
+                    use peripheral_bridge::pb::{msg, prost::Message};
+                    let rx_msgs = ws_msg.into_payload().to_vec();
+                    let rx_msgs = msg::MsgBatch::decode(rx_msgs.as_slice()).unwrap();
+                    log::info!("Received message: {:?}", rx_msgs);
+
+                    ws_stream
+                        .send(tokio_websockets::Message::binary(msg.into_payload()))
+                        .await?;
                 }
             }
             Err(e) => {
