@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::peripheral,
@@ -8,6 +9,7 @@ use esp_idf_svc::{
 };
 use futures_util::SinkExt;
 use peripheral_bridge::pb::{msg::*, prost::Message};
+use tokio_websockets::{ClientBuilder, Message as WsMessage};
 
 fn wifi(
     ssid: &str,
@@ -92,7 +94,7 @@ fn main() -> anyhow::Result<()> {
     let config = config::Config::new()
         .baudrate(8.MHz().into())
         .data_mode(config::MODE_3);
-    let mut spi = SpiDeviceDriver::new(&driver, Some(cs), &config)?;
+    let spi = SpiDeviceDriver::new(driver, Some(cs), &config)?;
 
     // Configures the button
     let mut button = esp_idf_svc::hal::gpio::PinDriver::input(peripherals.pins.gpio9)?;
@@ -124,7 +126,7 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(url) = SERVER_URL {
         log::info!("start WebSocket task to {}", url);
-        tokio_runtime.block_on(ws_task(url))?;
+        tokio_runtime.block_on(ws_task(url, spi))?;
     } else {
         log::warn!("No SERVER_URL provided, skipping WebSocket task");
     }
@@ -139,38 +141,21 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn ws_task(url: &str) -> anyhow::Result<()> {
+async fn ws_task(
+    url: &str,
+    mut spi: SpiDeviceDriver<'static, SpiDriver<'_>>,
+) -> anyhow::Result<()> {
     use futures_util::StreamExt;
 
-    let (mut ws_stream, _) = tokio_websockets::ClientBuilder::new()
-        .uri(url)?
-        .connect()
-        .await?;
+    let (mut ws_stream, _) = ClientBuilder::new().uri(url)?.connect().await?;
     log::info!("WebSocket connected to {}", url);
 
-    let mut i = 0;
     while let Some(msg) = ws_stream.next().await {
         match msg {
             Ok(msg) => {
-                if let Some(text) = msg.as_text() {
-                    log::info!("Received message: {}", text);
-                    // tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    ws_stream
-                        .send(tokio_websockets::Message::text(format!(
-                            "hello websocket from ESP32 to Server: {i}"
-                        )))
-                        .await?;
-                    i += 1;
-                    if i > 10 {
-                        log::info!("Done, closing WebSocket connection");
-                        break;
-                    }
-                } else {
-                    // let ws_msg = msg.clone();
-                    // log::info!("Received message: {:?}", ws_msg);
+                if msg.is_binary() {
                     let rx_msgs = msg.into_payload().to_vec();
                     let rx_msgs = MsgBatch::decode(rx_msgs.as_slice()).unwrap();
-                    // log::info!("Received message: {:?}", rx_msgs);
                     for msg in rx_msgs.msgs {
                         for seq in msg.seqs {
                             match Operation::try_from(seq.operation).unwrap() {
@@ -178,21 +163,73 @@ async fn ws_task(url: &str) -> anyhow::Result<()> {
                                     log::info!("Received Ack operation");
                                 }
                                 Operation::Read => {
-                                    log::info!("Received Read operation");
+                                    // log::info!("Read addr: 0x{:x?}", seq.address);
+                                    if let Some(sequence) = seq.data {
+                                        let mut rx_buf = vec![0; sequence.len() + 1];
+                                        rx_buf[0] = seq.address as u8 | 0x80;
+                                        spi.transfer_in_place_async(&mut rx_buf).await?;
+                                        // log::info!("Spi Read data: {:?}", rx_buf);
+                                        let rsp = MsgBatch {
+                                            msgs: vec![Msg {
+                                                transport: TransportType::WebSocket as i32,
+                                                bus: BusType::Spi as i32,
+                                                seqs: vec![BusOps {
+                                                    operation: Operation::Ack as i32,
+                                                    address: seq.address,
+                                                    data: Some(rx_buf[1..].to_vec()),
+                                                    ..Default::default()
+                                                }],
+                                            }],
+                                        };
+                                        let buffer = rsp.encode_to_vec();
+                                        let buffer = Bytes::from(buffer);
+
+                                        ws_stream.send(WsMessage::binary(buffer)).await?;
+                                    }
                                 }
                                 Operation::Write => {
-                                    log::info!("Received Write operation");
+                                    // log::info!("Received Write operation");
+                                    if let Some(sequence) = seq.data {
+                                        let mut tx_buf = vec![seq.address as u8];
+                                        tx_buf.extend_from_slice(&sequence);
+                                        spi.transfer_in_place_async(&mut tx_buf).await?;
+
+                                        // let rsp = MsgBatch {
+                                        //     msgs: vec![Msg {
+                                        //         transport: TransportType::WebSocket as i32,
+                                        //         bus: BusType::Spi as i32,
+                                        //         seqs: vec![BusOps {
+                                        //             operation: Operation::Ack as i32,
+                                        //             address: seq.address,
+                                        //             data: None,
+                                        //             delay_us: None,
+                                        //         }],
+                                        //     }],
+                                        // };
+                                        // let buffer = rsp.encode_to_vec();
+                                        // let buffer = Bytes::from(buffer);
+                                        // ws_stream.send(WsMessage::binary(buffer)).await?;
+                                    }
                                 }
                                 Operation::Transfer => {
-                                    log::info!("Received Transfer operation");
+                                    // log::info!("Received Transfer operation");
+                                    if let Some(sequence) = seq.data {
+                                        let mut tx_buf = vec![seq.address as u8];
+                                        tx_buf.extend_from_slice(&sequence);
+                                        spi.transfer_in_place_async(&mut tx_buf).await?;
+                                    }
                                 }
+                            }
+
+                            if let Some(delay_us) = seq.delay_us {
+                                log::trace!("delay_us: {}", delay_us);
+                                tokio::time::sleep(std::time::Duration::from_micros(
+                                    delay_us as u64,
+                                ))
+                                .await;
                             }
                         }
                     }
-
-                    // ws_stream
-                    //     .send(tokio_websockets::Message::binary(msg.into_payload()))
-                    //     .await?;
                 }
             }
             Err(e) => {
